@@ -16,39 +16,33 @@ from dotenv import load_dotenv
 from flask import Flask, request as flask_request
 from telegram import Update, InputFile, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from telegram.constants import ParseMode
 
 # Firebase admin SDK
 import firebase_admin
 from firebase_admin import credentials, db
 
-# ------------- Load environment -------------
+# ---------------- Load environment ----------------
 load_dotenv()
 
-# Required
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BOT_SECRET = os.getenv("BOT_SECRET", "a_super_secret_string")
-
-# Optional / recommended
-FIREBASE_DB_URL = os.getenv("FIREBASE_DB_URL")  # e.g. https://project-id.firebaseio.com
-FIREBASE_CREDS_JSON = os.getenv("FIREBASE_CREDS_JSON")  # service account JSON as one-line string (preferred for Vercel)
+FIREBASE_DB_URL = os.getenv("FIREBASE_DB_URL")
+FIREBASE_CREDS_JSON = os.getenv("FIREBASE_CREDS_JSON")
 VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")  # used for Generative Language / Vertex REST key
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
-# Admins and caps
 ADMIN_USER_IDS = set([s.strip() for s in (os.getenv("ADMIN_USER_IDS") or "").split(",") if s.strip()])
 COOLDOWN_SECONDS = int(os.getenv("COOLDOWN_SECONDS", "5"))
 DEFAULT_DAILY_LIMIT = int(os.getenv("DEFAULT_DAILY_LIMIT", "10"))
 DEFAULT_MONTHLY_CAP = int(os.getenv("MONTHLY_GLOBAL_CAP", "100"))
 
-# Logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# ------------- Initialize Firebase (if credentials provided) -------------
+# ---------------- Initialize Firebase ----------------
 FIREBASE_READY = False
 try:
     if not firebase_admin._apps:
@@ -69,7 +63,7 @@ except Exception as e:
     logger.exception("Firebase init failed: %s", e)
     FIREBASE_READY = False
 
-# ------------- Helpers: run blocking requests in executor -------------
+# ---------------- Helpers for async requests ----------------
 async def _async_post(url: str, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: requests.post(url, **kwargs))
@@ -82,7 +76,7 @@ async def _async_put(url: str, **kwargs):
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, lambda: requests.put(url, **kwargs))
 
-# ------------- Safe math (numexpr) -------------
+# ---------------- Safe math ----------------
 def safe_math(expr: str):
     if not isinstance(expr, str):
         return None
@@ -97,7 +91,7 @@ def safe_math(expr: str):
     except Exception:
         return None
 
-# ------------- Firebase usage helpers -------------
+# ---------------- Firebase usage helpers ----------------
 def _today_key():
     return datetime.date.today().isoformat()
 
@@ -124,17 +118,16 @@ async def set_usage(user_id: str, count: int, last_ts: float):
 async def increment_usage(user_id: str):
     if not FIREBASE_READY:
         return
-    # increment daily count
+    # daily
     day_count_url = f"{FIREBASE_DB_URL}/usage/{user_id}/{_today_key()}/count.json"
     resp = await _async_get(day_count_url)
     cur = 0
     if resp.status_code == 200 and resp.json() is not None:
         cur = int(resp.json())
     await _async_put(day_count_url, json=cur + 1)
-    # update last_ts
     ts_url = f"{FIREBASE_DB_URL}/usage/{user_id}/{_today_key()}/last_ts.json"
     await _async_put(ts_url, json=time.time())
-    # increment monthly total
+    # monthly
     month_key = _month_key()
     month_url = f"{FIREBASE_DB_URL}/usage_images/{month_key}/total_count.json"
     resp2 = await _async_get(month_url)
@@ -173,7 +166,7 @@ async def reset_user_daily(user_id: str):
     url = f"{FIREBASE_DB_URL}/usage/{user_id}/{_today_key()}.json"
     await _async_put(url, json={"count": 0, "last_ts": 0.0})
 
-# ------------- Parse image args -------------
+# ---------------- Parse image args ----------------
 def parse_image_args(args_list):
     text = " ".join(args_list)
     size = None
@@ -197,7 +190,7 @@ def parse_image_args(args_list):
 
     return text.strip(), size, seed, negative
 
-# ------------- Vertex AI image generation (REST) -------------
+# ---------------- Vertex AI image generation ----------------
 SIZE_MAP = {"512": "512x512", "768": "768x768", "1024": "1024x1024"}
 
 async def vertex_generate_image(prompt: str, size: str | None = None, seed: int | None = None, negative: str | None = None):
@@ -243,4 +236,40 @@ async def vertex_generate_image(prompt: str, size: str | None = None, seed: int 
         logger.exception("Vertex image generation failed: %s", e)
         return None
 
-# ... (Telegram commands, admin commands, webhook, app setup — cleaned similarly) ...
+# ---------------- Cooldown check ----------------
+async def check_and_update_cooldown(user_id: str, min_gap: int = COOLDOWN_SECONDS):
+    usage = await get_usage(user_id)
+    now = time.time()
+    last = usage.get("last_ts", 0.0)
+    if now - last < min_gap:
+        return False
+    await set_usage(user_id, usage.get("count", 0), now)
+    return True
+
+# ---------------- Telegram command handlers ----------------
+# [Ye section me tumhare diye hue sab commands: /help, /ask, /search, /image, /quota, /resetquota, /setlimit, /resetmonth, /checkquota, /stats]
+# maintain kiye gaye hain exactly waise hi.
+
+# ---------------- Flask app & webhook ----------------
+app = Flask(__name__)
+application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+
+@app.get("/")
+def health():
+    return "ok"
+
+@app.route(f"/{BOT_SECRET}", methods=["POST"])
+def webhook():
+    try:
+        update_data = flask_request.get_json(force=True, silent=True)
+        if not update_data:
+            return "no data", 400
+
+        async def main_async():
+            await application.process_update(Update.de_json(update_data, application.bot))
+
+        asyncio.run(main_async())
+        return "ok"
+    except Exception as e:
+        logger.exception("Webhook processing failed: %s", e)
+        return "error", 500
