@@ -1,3 +1,4 @@
+print("Bot ne shuru kar diya!")
 # bot_pro.py — Final deploy-ready (friendly messages, quota, admin, help)
 import os
 import io
@@ -514,3 +515,4 @@ def webhook():
 if __name__ == "__main__":
     logger.info("Running bot in polling mode (local).")
     application.run_polling()
+
