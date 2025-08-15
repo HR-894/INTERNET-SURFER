@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "bot_pro.py",
+      "use": "@vercel/python",
+      "config": { "runtime": "python3.9" }
+    }
+  ],
+  "routes": [{ "src": "/.*", "dest": "bot_pro.py" }]
+}

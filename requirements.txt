@@ -1,0 +1,8 @@
+python-telegram-bot==21.6
+python-dotenv
+requests
+flask
+firebase-admin
+google-auth
+google-cloud-aiplatform
+numexpr
