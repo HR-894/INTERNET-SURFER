@@ -106,7 +106,6 @@ def _month_key():
     return f"{d.year}-{d.month:02d}"
 
 async def get_usage(user_id: str):
-    """Return dict with 'count' and 'last_ts' for today for given user."""
     if not FIREBASE_READY:
         return {"count": 0, "last_ts": 0.0}
     url = f"{FIREBASE_DB_URL}/usage/{user_id}/{_today_key()}.json"
@@ -123,7 +122,6 @@ async def set_usage(user_id: str, count: int, last_ts: float):
     await _async_put(url, json={"count": int(count), "last_ts": float(last_ts)})
 
 async def increment_usage(user_id: str):
-    """Increment user's daily count and monthly global total."""
     if not FIREBASE_READY:
         return
     # increment daily count
@@ -145,4 +143,104 @@ async def increment_usage(user_id: str):
         curm = int(resp2.json())
     await _async_put(month_url, json=curm + 1)
 
-# ... (rest of the code cleaned similarly, all U+00A0 removed) ...
+async def get_daily_limit(user_id: str):
+    if not FIREBASE_READY:
+        return DEFAULT_DAILY_LIMIT
+    url = f"{FIREBASE_DB_URL}/limits/{user_id}/daily.json"
+    resp = await _async_get(url)
+    if resp.status_code == 200 and resp.json() is not None:
+        return int(resp.json())
+    return DEFAULT_DAILY_LIMIT
+
+async def get_monthly_total():
+    if not FIREBASE_READY:
+        return 0
+    url = f"{FIREBASE_DB_URL}/usage_images/{_month_key()}/total_count.json"
+    resp = await _async_get(url)
+    if resp.status_code == 200 and resp.json() is not None:
+        return int(resp.json())
+    return 0
+
+async def reset_monthly_total():
+    if not FIREBASE_READY:
+        return
+    url = f"{FIREBASE_DB_URL}/usage_images/{_month_key()}/total_count.json"
+    await _async_put(url, json=0)
+
+async def reset_user_daily(user_id: str):
+    if not FIREBASE_READY:
+        return
+    url = f"{FIREBASE_DB_URL}/usage/{user_id}/{_today_key()}.json"
+    await _async_put(url, json={"count": 0, "last_ts": 0.0})
+
+# ------------- Parse image args -------------
+def parse_image_args(args_list):
+    text = " ".join(args_list)
+    size = None
+    seed = None
+    negative = None
+
+    m = re.search(r"--size\s+(512|768|1024)", text)
+    if m:
+        size = m.group(1)
+        text = re.sub(r"--size\s+(512|768|1024)", "", text)
+
+    m = re.search(r"--seed\s+(\d+)", text)
+    if m:
+        seed = int(m.group(1))
+        text = re.sub(r"--seed\s+\d+", "", text)
+
+    m = re.search(r"--no\s+([^\n]+)", text)
+    if m:
+        negative = m.group(1).strip()
+        text = re.sub(r"--no\s+[^\n]+", "", text)
+
+    return text.strip(), size, seed, negative
+
+# ------------- Vertex AI image generation (REST) -------------
+SIZE_MAP = {"512": "512x512", "768": "768x768", "1024": "1024x1024"}
+
+async def vertex_generate_image(prompt: str, size: str | None = None, seed: int | None = None, negative: str | None = None):
+    if not (VERTEX_PROJECT_ID and GEMINI_API_KEY and VERTEX_LOCATION):
+        logger.error("Vertex configuration missing")
+        return None
+
+    url = (
+        f"https://{VERTEX_LOCATION}-aiplatform.googleapis.com/v1/projects/"
+        f"{VERTEX_PROJECT_ID}/locations/{VERTEX_LOCATION}/publishers/google/models/imagegeneration:predict?key={GEMINI_API_KEY}"
+    )
+
+    parameters = {"sampleCount": 1, "imageSize": SIZE_MAP.get(size or "1024", "1024x1024")}
+    if seed is not None:
+        parameters["seed"] = int(seed)
+
+    final_prompt = prompt
+    if negative:
+        parameters["negativePrompt"] = negative
+        final_prompt = f"{prompt}. Avoid: {negative}"
+
+    payload = {"instances": [{"prompt": final_prompt}], "parameters": parameters}
+    headers = {"Content-Type": "application/json"}
+
+    try:
+        resp = await _async_post(url, json=payload, headers=headers, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        enc = None
+        if isinstance(data.get("predictions"), list) and data["predictions"]:
+            pred = data["predictions"][0]
+            enc = pred.get("bytesBase64Encoded") or pred.get("b64") or pred.get("imageBytes") or None
+            if not enc:
+                for v in pred.values():
+                    if isinstance(v, str) and len(v) > 100:
+                        enc = v
+                        break
+        if not enc:
+            logger.error("No base64 image in Vertex response: %s", data)
+            return None
+        return base64.b64decode(enc)
+    except Exception as e:
+        logger.exception("Vertex image generation failed: %s", e)
+        return None
+
+# ... (Telegram commands, admin commands, webhook, app setup — cleaned similarly) ...
