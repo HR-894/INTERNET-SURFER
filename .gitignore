@@ -1,0 +1,3 @@
+echo -e "KEYS.txt\nfirebase.json\n.env\n__pycache__/\n" > .gitignore
+git add .gitignore
+git commit -m "ignore secrets"
