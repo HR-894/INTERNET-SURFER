@@ -30,11 +30,11 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 BOT_SECRET = os.getenv("BOT_SECRET", "a_super_secret_string")
 
 # Optional / recommended
-FIREBASE_DB_URL = os.getenv("FIREBASE_DB_URL")               # e.g. https://project-id.firebaseio.com
-FIREBASE_CREDS_JSON = os.getenv("FIREBASE_CREDS_JSON")       # service account JSON as one-line string (preferred for Vercel)
+FIREBASE_DB_URL = os.getenv("FIREBASE_DB_URL")                # e.g. https://project-id.firebaseio.com
+FIREBASE_CREDS_JSON = os.getenv("FIREBASE_CREDS_JSON")        # service account JSON as one-line string (preferred for Vercel)
 VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")                 # used for Generative Language / Vertex REST key
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")                  # used for Generative Language / Vertex REST key
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 SEARCH_ENGINE_ID = os.getenv("SEARCH_ENGINE_ID")
 
@@ -504,15 +504,18 @@ def health():
 # Webhook endpoint for Telegram updates — Vercel will POST here
 @app.route(f"/{BOT_SECRET}", methods=["POST"])
 def webhook():
-    update_data = flask_request.get_json(force=True, silent=True)
-    if not update_data:
-        return "no data", 400
-    update_obj = Update.de_json(update_data, application.bot)
-    application.update_queue.put_nowait(update_obj)
-    return "ok"
+    try:
+        update_data = flask_request.get_json(force=True, silent=True)
+        if not update_data:
+            return "no data", 400
+        update_obj = Update.de_json(update_data, application.bot)
+        application.update_queue.put_nowait(update_obj)
+        return "ok"
+    except Exception as e:
+        logger.exception("Webhook processing failed: %s", e)
+        return "error", 500
 
 # Local run (for testing)
 if __name__ == "__main__":
     logger.info("Running bot in polling mode (local).")
     application.run_polling()
-
