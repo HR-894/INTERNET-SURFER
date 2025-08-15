@@ -1,0 +1,37 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "bot_pro.py",
+      "use": "@vercel/python",
+      "config": { "maxLambdaSize": "50mb" }
+    }
+  ],
+  "routes": [
+    {
+      "src": "/",
+      "methods": ["GET"],
+      "dest": "bot_pro.py"
+    },
+    {
+      "src": "/(.*)",
+      "methods": ["POST"],
+      "dest": "bot_pro.py"
+    }
+  ],
+  "env": {
+    "TELEGRAM_TOKEN": "@TELEGRAM_TOKEN",
+    "BOT_SECRET": "@BOT_SECRET",
+    "FIREBASE_DB_URL": "@FIREBASE_DB_URL",
+    "FIREBASE_CREDS_JSON": "@FIREBASE_CREDS_JSON",
+    "VERTEX_PROJECT_ID": "@VERTEX_PROJECT_ID",
+    "VERTEX_LOCATION": "@VERTEX_LOCATION",
+    "GEMINI_API_KEY": "@GEMINI_API_KEY",
+    "GOOGLE_API_KEY": "@GOOGLE_API_KEY",
+    "SEARCH_ENGINE_ID": "@SEARCH_ENGINE_ID",
+    "ADMIN_USER_IDS": "@ADMIN_USER_IDS",
+    "COOLDOWN_SECONDS": "5",
+    "DEFAULT_DAILY_LIMIT": "10",
+    "MONTHLY_GLOBAL_CAP": "100"
+  }
+}
