@@ -3,6 +3,5 @@ python-dotenv
 requests
 flask
 firebase-admin
-google-auth
-google-cloud-aiplatform
 numexpr
+
