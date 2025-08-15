@@ -509,8 +509,14 @@ def webhook():
         update_data = flask_request.get_json(force=True, silent=True)
         if not update_data:
             return "no data", 400
-        update_obj = Update.de_json(update_data, application.bot)
-        application.update_queue.put_nowait(update_obj)
+        
+        # This part handles the update synchronously
+        async def main_async():
+            await application.process_update(
+                Update.de_json(update_data, application.bot)
+            )
+
+        asyncio.run(main_async())
         return "ok"
     except Exception as e:
         logger.exception("Webhook processing failed: %s", e)
