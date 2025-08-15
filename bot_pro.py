@@ -260,6 +260,7 @@ async def check_and_update_cooldown(user_id: str, min_gap: int = COOLDOWN_SECOND
 
 # ------------- Telegram command handlers -------------
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("Help command called!")
     txt = (
         "✨ *Surfer Bot — Help & Commands* ✨\n\n"
         "Text commands (unlimited):\n"
